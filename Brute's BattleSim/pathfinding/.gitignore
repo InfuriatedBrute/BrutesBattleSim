@@ -1,0 +1,10 @@
+/AStarHeuristic.class
+/AStarPathFinder$Node.class
+/AStarPathFinder$SortedList.class
+/AStarPathFinder.class
+/ClosestHeuristic.class
+/Mover.class
+/Path$Step.class
+/Path.class
+/PathFinder.class
+/TileBasedMap.class

@@ -1,0 +1,3 @@
+Attacker: idjemci
+Defender: imviow
+Seed: -465381
