@@ -336,7 +336,7 @@ public class Battle implements TileBasedMap {
 		if (unit.currentAction.description.equals("Attack")) {
 			Unit enemy = grid[tx][ty];
 			if ((Math.abs(p.x - tx) + Math.abs(p.y - ty)) <= unit.get(Stat.RNG) && enemy != null) {
-				if (enemy.get(Stat.MAXHP) / unit.get(Stat.DMG) + stunValue(enemy) >= Constants.STUN_THRESHOLD) {
+				if (enemy.get(Stat.DMG) / unit.get(Stat.MAXHP) + stunValue(enemy) >= Constants.STUN_THRESHOLD) {
 					// crit
 					enemy.currentAction = null;
 					damage(enemy, unit.get(Stat.DMG));
