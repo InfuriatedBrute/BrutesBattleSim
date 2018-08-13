@@ -1,7 +1,5 @@
 package main;
 
-import java.awt.Font;
-
 public class Constants {
 	public static final int MAX_SEARCH_DISTANCE = 100;
 	public static final double STUN_THRESHOLD = 1.10;

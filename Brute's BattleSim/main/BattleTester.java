@@ -9,9 +9,9 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.util.Objects;
 import java.util.Random;
-import java.util.Set;
 
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
