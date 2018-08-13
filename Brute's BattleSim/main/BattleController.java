@@ -5,5 +5,5 @@
 package main;
 
 public abstract class BattleController {
-	public abstract void endOfTurn(boolean lastTurn) throws Exception;
+	public abstract void endOfTurn() throws Exception;
 }

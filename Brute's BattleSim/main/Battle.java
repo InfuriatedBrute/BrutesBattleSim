@@ -1,12 +1,12 @@
 package main;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.nio.file.*;
-import java.util.*;
+import java.nio.file.InvalidPathException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
 
-import pathfinding.AStarHeuristic;
+import enums.Stat;
 import pathfinding.AStarPathFinder;
 import pathfinding.ClosestHeuristic;
 import pathfinding.Mover;
@@ -14,107 +14,71 @@ import pathfinding.TileBasedMap;
 import simpleconcepts.Action;
 import simpleconcepts.Point;
 import simpleconcepts.Unit;
-import types.Attribute;
-import types.Stat;
-import types.UnitType;
 
 /**
  * The top-level tactical class. Handles just about all model aspects of a
  * simulation. Also handles all model aspects of a replay; battles with
  * identical setup (including the RNG seed) will always play out identically
+ * 
  * @author InfuriatedBrute
  */
 
 public class Battle implements TileBasedMap {
-	public static final int MAX_SEARCH_DISTANCE = 100;
-	public static final double STUN_THRESHOLD = 1.10;
-	public static final int MAP_WIDTH = 50;
-	public static final int MAP_HEIGHT = 10;
-	public static final int START_AREA_WIDTH = 6;
-	public static final int START_AREA_HEIGHT = 6;
-	public static final int TURN_LIMIT = 1000;
-	public static final boolean START_AREA_CAN_BE_CENTERED = START_AREA_HEIGHT % 2 == MAP_HEIGHT % 2;
-	private static final double NO_ACTION_STUN_VALUE = -0.10;
-	private static final int BASE_MOVE_TIME = 10;
 	Random random;
 	int turn = 1;
 	List<String> saidList = new ArrayList<String>();
-	Unit[][] grid = new Unit[MAP_HEIGHT][MAP_WIDTH];
-	boolean[][] pathFinderVisited = new boolean[MAP_HEIGHT][MAP_WIDTH];
+	Unit[][] grid = new Unit[Constants.MAP_HEIGHT][Constants.MAP_WIDTH];
+	boolean[][] pathFinderVisited = new boolean[Constants.MAP_HEIGHT][Constants.MAP_WIDTH];
 	BattleController battleController;
 	boolean actionPerformedThisTurn = false;
-	AStarPathFinder pf = new AStarPathFinder(this, MAX_SEARCH_DISTANCE, true, new ClosestHeuristic());
+	AStarPathFinder pf;
 
-	public Battle(File file, BattleController battleController)
-			throws FileNotFoundException, IOException, NumberFormatException {
+	public Battle(String[] attackerArmy, String[] defenderArmy, Long RNGseed, BattleController battleController) {
 		this.battleController = battleController;
-		Scanner sc = new Scanner(file);
-		String line = sc.nextLine();
-		assert (line.indexOf("Attacker: ") == 0);
-		File attackerFile = new File("textfiles\\Armies\\" + line.substring(line.indexOf(" ") + 1) + ".txt");
-		line = sc.nextLine();
-		assert (line.indexOf("Defender: ") == 0);
-		File defenderFile = new File("textfiles\\Armies\\" + line.substring(line.indexOf(" ") + 1) + ".txt");
-		line = sc.nextLine();
-		assert (line.indexOf("Seed: ") == 0);
-		random = new Random(Long.parseLong(line.substring(line.indexOf(" ") + 1)));
-		addUnitsOfBothSides(attackerFile, defenderFile);
-		sc.close();
+		random = new Random(RNGseed);
+		pf = new AStarPathFinder(this, Constants.MAX_SEARCH_DISTANCE, true, new ClosestHeuristic(), random);
+		addUnitsOfBothSides(attackerArmy, defenderArmy);
 	}
 
-	private void addUnitsOfBothSides(File attackerFile, File defenderFile) throws FileNotFoundException {
-		assert (START_AREA_CAN_BE_CENTERED);
-		addUnitsOfOneSide(attackerFile, true);
-		addUnitsOfOneSide(defenderFile, false);
+	private void addUnitsOfBothSides(String[] attackerArmy, String[] defenderArmy) {
+		assert (Constants.START_AREA_CAN_BE_CENTERED);
+		addUnitsOfOneSide(attackerArmy, true);
+		addUnitsOfOneSide(defenderArmy, false);
 	}
 
-	private void addUnitsOfOneSide(File file, boolean attacker) throws FileNotFoundException {
-		Scanner sc = new Scanner(file);
+	private void addUnitsOfOneSide(String[] army, boolean attacker) {
+		assert (army.length == Constants.START_AREA_HEIGHT);
 		int row = 0;
-
-		while (sc.hasNextLine()) {
-			assert (row < START_AREA_HEIGHT);
-			String line = sc.nextLine();
-			int column = 0;
+		for (String line : army) {
+			assert (line.length() == Constants.START_AREA_WIDTH );
+			int col = 0;
 			for (char c : line.toCharArray()) {
-				assert (column < START_AREA_WIDTH);
-				if (c != '~') {
-					Unit u = new Unit(getUnitTypeByCharacter(c));
+				if (c != Constants.BLANK_SPACE_CHAR) {
+					Unit u;
+					try {
+						u = (Unit.getTypes().get(c)).getConstructor().newInstance();
+					} catch (Exception e) {
+						e.printStackTrace();
+						throw new RuntimeException();
+					}
 					u.attacker = attacker ? 1 : -1;
-					int x = row + ((MAP_HEIGHT - START_AREA_HEIGHT) / 2);
-					int y = attacker ? column : MAP_WIDTH - column - 1;
+					int x = row + ((Constants.MAP_HEIGHT - Constants.START_AREA_HEIGHT) / 2);
+					int y = attacker ? col : Constants.MAP_WIDTH - col - 1;
 					grid[x][y] = u;
 				}
-				column++;
+				col++;
 			}
 			row++;
 		}
-		sc.close();
 	}
 
-	private UnitType getUnitTypeByCharacter(char c) {
-		UnitType toReturn = null;
-		File dir = new File("textfiles\\UnitTypes\\");
-		String[] unitTypeFiles = dir.list();
-		for (String s : unitTypeFiles) {
-			UnitType ut = new UnitType(s.substring(0, s.lastIndexOf(".txt")));
-			char[] ca = ut.get(Attribute.ICON).toCharArray();
-			if (ca.length > 1) {
-				throw new RuntimeException("A unit type's icon is more than one character.");
-			} else if (ca[0] == c) {
-				if (toReturn == null) {
-					toReturn = ut;
-				} else {
-					throw new RuntimeException("Two unit types share the same character.");
-				}
-			}
-		}
-		return toReturn;
-	}
-
-	public void simulate() {
+	/**
+	 * 
+	 * @return 1 for attacker victory, 0 for stalemate, -1 for defender victory
+	 */
+	public int simulate() {
 		try {
-			while (turn <= TURN_LIMIT && !oneSideEmpty()) {
+			while (turn <= Constants.TURN_LIMIT && oneSideEmpty() == 0) {
 				ArrayList<Unit> queued = new ArrayList<Unit>();
 				for (Unit[] ua : grid) {
 					for (Unit u : ua) {
@@ -126,19 +90,21 @@ public class Battle implements TileBasedMap {
 				Collections.shuffle(queued, random);
 				for (Unit u : queued)
 					tick(u);
-				battleController.endOfTurn(false);
+				battleController.endOfTurn();
 				turn++;
 				actionPerformedThisTurn = false;
 			}
-			if (turn > TURN_LIMIT)
-				turn--;
-			battleController.endOfTurn(true);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		return oneSideEmpty();
 	}
 
-	private boolean oneSideEmpty() {
+	/**
+	 * 
+	 * @return 1 if defenders empty, 0 if neither side empty, -1 if attackers empty
+	 */
+	private int oneSideEmpty() {
 		int attackers = 0;
 		int defenders = 0;
 		for (Unit[] ua : grid) {
@@ -153,7 +119,13 @@ public class Battle implements TileBasedMap {
 					throw new RuntimeException("There's a neutral unit on the field. How did this happen?");
 			}
 		}
-		return (attackers == 0 || defenders == 0);
+		if(attackers == 0 && defenders == 0)
+			throw new RuntimeException("Both attackers and defenders are dead. This should be impossible.");
+		if(defenders == 0)
+			return 1;
+		if(attackers == 0)
+			return -1;
+		return 0;
 	}
 
 	/**
@@ -166,17 +138,25 @@ public class Battle implements TileBasedMap {
 	private void moveAttackNearestEnemy(Unit u) {
 		int closestEnemyDist = Integer.MAX_VALUE;
 		Point closestEnemyPoint = null;
-		ArrayList<Point> enemyPointsInAttackRange = new ArrayList<>();
+		Point enemyPointInAttackRange = null;
 		Point p = getLocationOf(u);
+		ArrayList<Integer> xList = new ArrayList<>();
+		ArrayList<Integer> yList = new ArrayList<>();
 		for (int x = 0; x < grid.length; x++)
-			for (int y = 0; y < grid[x].length; y++) {
+			xList.add(x);
+		for (int y = 0; y < grid[0].length; y++)
+			yList.add(y);
+		Collections.shuffle(xList, random);
+		Collections.shuffle(yList, random);
+		for (int x : xList) {
+			for (int y : yList) {
 				Unit u2 = grid[x][y];
 				if (u2 != null && u2.attacker == u.attacker * -1) { // they are enemies and obviously not duplicates
-					if (enemyPointsInAttackRange.isEmpty()
-							&& ((Math.abs(p.x - x) + Math.abs(p.y - y)) > u.type.get(Stat.RNG))) { // no enemies in
-																									// range
+					if (enemyPointInAttackRange == null
+							&& ((Math.abs(p.x - x) + Math.abs(p.y - y)) > u.get(Stat.RNG))) { // no enemies in
+																								// range
 						Point enemyPoint = new Point(x, y);
-						pathfinding.Path path = pathfind(u, enemyPoint, u.type.get(Stat.RNG));
+						pathfinding.Path path = pathfind(u, enemyPoint, u.get(Stat.RNG));
 						if (path != null) {
 							int pathDistance = path.getLength();
 							if (pathDistance < closestEnemyDist) {
@@ -184,16 +164,16 @@ public class Battle implements TileBasedMap {
 								closestEnemyPoint = enemyPoint;
 							}
 						}
-					} else if (((Math.abs(p.x - x) + Math.abs(p.y - y)) <= u.type.get(Stat.RNG))) {
-						enemyPointsInAttackRange.add(new Point(x, y));
+					} else if (((Math.abs(p.x - x) + Math.abs(p.y - y)) <= u.get(Stat.RNG))) {
+						enemyPointInAttackRange = new Point(x, y);
 					}
 				}
 			}
-		if (enemyPointsInAttackRange.isEmpty() && closestEnemyPoint != null) {
+		}
+		if (enemyPointInAttackRange == null && closestEnemyPoint != null) {
 			u.currentAction = new Action("Move", closestEnemyPoint);
-		} else if (!enemyPointsInAttackRange.isEmpty()) {
-			u.currentAction = new Action("Attack",
-					enemyPointsInAttackRange.get(random.nextInt(enemyPointsInAttackRange.size())));
+		} else if (enemyPointInAttackRange != null) {
+			u.currentAction = new Action("Attack", enemyPointInAttackRange);
 		}
 	}
 
@@ -217,61 +197,47 @@ public class Battle implements TileBasedMap {
 			 * @throws InvalidPathException
 			 *             generally if the unit's name contains an escape character such as
 			 *             ".", but in case of an unforeseen error there may be other causes
-			 *//*
-				 * private void parseOrder(Unit unit) throws IllegalArgumentException,
-				 * InvalidPathException { String unitTypeName = unit.type.get(Stat.NAME); Path
-				 * path = Paths.get("textfiles\\UnitTypes\\" + unitTypeName + ".txt"); if
-				 * (unit.currentAction != null) { // actions cannot be cancelled, so just
-				 * continue preparing the action tickAction(unit); } else { try { if
-				 * (!Files.exists(path)) Files.write(path, new ArrayList<String>());
-				 * List<String> lines = Files.readAllLines(path); boolean unitFound = false; int
-				 * x = 0; int y = 0; while(x < grid.length && !unitFound) { while(y <
-				 * grid.length && !unitFound) { if(grid[x][y].equals(unit))unitFound=true; else
-				 * y++; } x++; } if (!unitFound) throw new
-				 * RuntimeException("Unit whose orders are being parsed is not on the map.");
-				 * for (int i = 0; i < lines.size(); i++) { } } catch (IOException e) {
-				 * System.out.println("This shouldn't be possible, critical error");
-				 * e.printStackTrace(); } } }
-				 */
-
-	/*
-	 * attacker = whether the unit is an attacker, thus enemies would be the
-	 * defender, hence the ? -1 : 1 below
-	 * 
-	 * private Point nearestPointWithinLeniencyWithEnemy(boolean attacker, Point p,
-	 * int leniency) { List<Unit> enemies = new ArrayList<Unit>(); for (Unit[] ua :
-	 * grid) for (Unit u : ua) if (u != null && u.attacker == (attacker ? -1 : 1))
-	 * enemies.add(u); Unit closestEnemy = null; int closestEnemyDistance =
-	 * Integer.MAX_VALUE; for (Unit enemy : enemies) { if
-	 * (enemy.point.distanceFrom(p) < closestEnemyDistance) { closestEnemy = enemy;
-	 * closestEnemyDistance = enemy.point.distanceFrom(p); } } if (closestEnemy ==
-	 * null || closestEnemyDistance < leniency) return null; // else return
-	 * closestEnemy.point; }
-	 */
+			 */
 
 	// return null if no way to reach point, or point within leniency of point
 	// note that the leniency area will be square-shaped because of diagonal
 	// movement, plus-shaped would be for orthogonal movement
-	private pathfinding.Path pathfind(Unit u, Point p, int leniency) {
+	private pathfinding.Path pathfind(Unit unit, Point target, int leniency) {
 		int deviation = 0;
-		pathfinding.Path shortestPath = null;
+		pathfinding.Path optimalPath = null;
 		while (deviation <= leniency) {
-			for (int xDev = deviation * -1; xDev <= deviation; xDev++) {
-				for (int yDev = deviation * -1; yDev <= deviation; yDev++) {
-					int tx = p.x + xDev;
-					int ty = p.y + yDev;
-					if ((xDev == deviation || xDev == deviation * -1 || yDev == deviation || yDev == deviation * -1)
-							&& tx >= 0 && tx < MAP_HEIGHT && ty > 0 && p.y + yDev < MAP_WIDTH) {
-						p = getLocationOf(u);
-						pathfinding.Path path = pf.findPath(u, p.x, p.y, tx, ty);
-						if (path != null && (shortestPath == null || shortestPath.getLength() > path.getLength()))
-							shortestPath = path;
-					} // else don't bother we've already checked those points
+			ArrayList<Integer> xDevList = new ArrayList<>();
+			ArrayList<Integer> yDevList = new ArrayList<>();
+			for (int xDev = deviation * -1; xDev <= deviation; xDev++)
+				xDevList.add(xDev);
+			for (int yDev = deviation * -1; yDev <= deviation; yDev++)
+				yDevList.add(yDev);
+			Collections.shuffle(xDevList, random);
+			Collections.shuffle(yDevList, random);
+			for (int xDev : xDevList) {
+				for (int yDev : yDevList) {
+					int tx = target.x + xDev;
+					int ty = target.y + yDev;
+					// if we're not checkingOuter don't bother we've already checked those points
+					boolean checkingOuterPartsOfCurrentDeviation = xDev == deviation || xDev == deviation * -1
+							|| yDev == deviation || yDev == deviation * -1;
+					boolean combinedXYDevLessThanLeniency = Math.abs(xDev) + Math.abs(yDev) <= leniency;
+					boolean pointInMapBoundaries = (tx >= 0 && tx < Constants.MAP_HEIGHT)
+							&& (ty > 0 && ty < Constants.MAP_WIDTH);
+					if (checkingOuterPartsOfCurrentDeviation && combinedXYDevLessThanLeniency && pointInMapBoundaries) {
+						Point uLocation = getLocationOf(unit);
+						pathfinding.Path path = pf.findPath(unit, uLocation.x, uLocation.y, tx, ty);
+						if (path != null) {
+							if (optimalPath == null || path.getLength() < optimalPath.getLength()) {
+								optimalPath = path;
+							}
+						}
+					}
 				}
 			}
 			deviation++;
 		}
-		return shortestPath;
+		return optimalPath;
 	}
 
 	private void tick(Unit unit) {
@@ -316,7 +282,7 @@ public class Battle implements TileBasedMap {
 
 	public double stunValue(Unit u) {
 		if (u.currentAction == null)
-			return NO_ACTION_STUN_VALUE; // else
+			return Constants.NO_ACTION_STUN_VALUE; // else
 		return actionCompleteness(u);
 	}
 
@@ -331,7 +297,7 @@ public class Battle implements TileBasedMap {
 	 */
 	private double actionCompleteness(Unit u) {
 		assert (u.currentAction != null);
-		double unroundedTicksNeeded = BASE_MOVE_TIME / u.type.get(Stat.SPD);
+		double unroundedTicksNeeded = Constants.BASE_MOVE_TIME / u.get(Stat.SPD);
 		double roundedTicksNeeded = Math.floor(unroundedTicksNeeded);
 		if (unroundedTicksNeeded % 1.0 > random.nextDouble())
 			roundedTicksNeeded++;
@@ -369,13 +335,13 @@ public class Battle implements TileBasedMap {
 		Point p = getLocationOf(unit);
 		if (unit.currentAction.description.equals("Attack")) {
 			Unit enemy = grid[tx][ty];
-			if ((Math.abs(p.x - tx) + Math.abs(p.y - ty)) <= unit.type.get(Stat.RNG) && enemy != null) {
-				if (enemy.type.get(Stat.HP) / unit.type.get(Stat.DMG) + stunValue(enemy) >= STUN_THRESHOLD) {
+			if ((Math.abs(p.x - tx) + Math.abs(p.y - ty)) <= unit.get(Stat.RNG) && enemy != null) {
+				if (enemy.get(Stat.MAXHP) / unit.get(Stat.DMG) + stunValue(enemy) >= Constants.STUN_THRESHOLD) {
 					// crit
 					enemy.currentAction = null;
-					damage(enemy, unit.type.get(Stat.DMG));
+					damage(enemy, unit.get(Stat.DMG));
 				} else {
-					damage(enemy, unit.type.get(Stat.DMG) - enemy.type.get(Stat.ARM));
+					damage(enemy, unit.get(Stat.DMG) - enemy.get(Stat.ARM));
 				}
 			} else {
 				moveOneStepTowards(unit, new Point(tx, ty));
@@ -390,9 +356,12 @@ public class Battle implements TileBasedMap {
 	}
 
 	public void damage(Unit u, int dmg) {
-		u.hp -= dmg;
-		if (u.hp < dmg)
+		int plusOrMinusOne = random.nextInt(3) - 1;
+		int newHP = u.get(Stat.CURRENTHP) - dmg + plusOrMinusOne;
+		if (newHP < 0)
 			kill(u);
+		else
+			u.setHP(newHP);
 	}
 
 	public void kill(Unit u) {
@@ -413,14 +382,23 @@ public class Battle implements TileBasedMap {
 		}
 	}
 
-	// likely useless but here for potential reference
-	// private void setOrder(Unit unit, List<String> s) {
-	// try {
-	// Files.write(Paths.get("textfiles\\UnitTypes\\" + unit.type.get(Stat.NAME) +
-	// ".txt"), s);
-	// } catch (IOException e) {
-	// System.out.println("This shouldn't be possible, critical error");
-	// e.printStackTrace();
-	// }
-	// }
+	public static int getCost(String[] army) {
+		int toReturn = 0;
+		for (String line : army) {
+			for (char c : line.toCharArray()) {
+				if (c != Constants.BLANK_SPACE_CHAR) {
+					Class<? extends Unit> cl = Unit.getTypes().get(c);
+					if (cl != null) {
+						try {
+							toReturn += cl.getConstructor().newInstance().get(Stat.COST);
+						} catch (Exception e) {
+							e.printStackTrace();
+							throw new RuntimeException();
+						}
+					}
+				}
+			}
+		}
+		return toReturn;
+	}
 }
